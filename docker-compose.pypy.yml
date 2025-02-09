@@ -1,0 +1,17 @@
+version: '3'
+
+services:
+  imeme-pypy:
+    build:
+      context: .
+      args:
+        - IMAGE_NAME=${PYPY_IMAGE_NAME}
+        - IMAGE_VERSION=${PYPY_IMAGE_VERSION}
+    image: lycantropos/imeme-pypy:0.0.0
+    volumes:
+      - ./imeme:/opt/imeme/imeme
+      - ./pyproject.toml:/opt/imeme/pyproject.toml
+      - ./README.md:/opt/imeme/README.md
+      - ./setup.py:/opt/imeme/setup.py
+      - ./tests:/opt/imeme/tests
+    entrypoint: pytest

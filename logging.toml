@@ -1,0 +1,32 @@
+version = 1
+disable_existing_loggers = false
+
+[loggers.__main__]
+handlers = ["stderr", "stdout"]
+level = "INFO"
+
+[formatters.default]
+class = "logging.Formatter"
+format = "%(asctime)s\t%(levelname)s\t%(message)s"
+
+[filters.error]
+"()" = "imeme._core.logging.LevelRangeFilter"
+min_level = "WARNING"
+max_level = "CRITICAL"
+
+[filters.regular]
+"()" = "imeme._core.logging.LevelRangeFilter"
+min_level = "NOTSET"
+max_level = "INFO"
+
+[handlers.stderr]
+class = "logging.StreamHandler"
+formatter = "default"
+stream = "ext://sys.stderr"
+filters = ["error"]
+
+[handlers.stdout]
+class = "logging.StreamHandler"
+formatter = "default"
+stream = "ext://sys.stdout"
+filters = ["regular"]

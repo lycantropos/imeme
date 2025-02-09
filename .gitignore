@@ -1,0 +1,36 @@
+### Python
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+build/
+dist/
+eggs/
+.eggs/
+sdist/
+wheels/
+*.egg-info/
+
+# Unit test / coverage reports
+coverage.xml
+.hypothesis/
+.pytest_cache/
+
+# Environments
+venv*/
+
+# mypy
+.mypy_cache/
+
+### JetBrains
+.idea/
+
+### MacOS
+.DS_Store
+
+### imeme
+.cache/
+*.session
+sync.toml
