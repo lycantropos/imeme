@@ -30,7 +30,10 @@ venv*/
 ### MacOS
 .DS_Store
 
+### telethon
+*.session
+*.session-journal
+
 ### imeme
 .cache/
-*.session
 sync.toml
