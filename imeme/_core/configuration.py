@@ -40,7 +40,7 @@ class Configuration(Generic[_T]):
     def __init__(self, content: ConfigurationSection[_T], /) -> None:
         self._content = content
 
-    def __repr__(self) -> str:
+    def __repr__(self, /) -> str:
         return f'{type(self).__qualname__}({self._content!r})'
 
 
@@ -108,28 +108,30 @@ class ConfigurationSection(Mapping[str, ConfigurationField[_ValueT]]):
         try:
             value = self._raw[key]
         except KeyError:
-            raise KeyError(
-                f'{self._json_path} section of '
-                f'{self._file_path.as_posix()} configuration file '
-                f'does not contain "{key}" field.'
-            ) from None
+            raise KeyError(f'{self} does not contain "{key}" field.') from None
         else:
             return ConfigurationField(
                 value, self._json_path.join_key(key), self._file_path
             )
 
-    def __iter__(self) -> Iterator[str]:
+    def __iter__(self, /) -> Iterator[str]:
         return iter(self._raw)
 
-    def __len__(self) -> int:
+    def __len__(self, /) -> int:
         return len(self._raw)
 
-    def __repr__(self) -> str:
+    def __repr__(self, /) -> str:
         return (
             f'{type(self).__qualname__}'
             '('
             f'{self._raw!r}, {self._json_path!r}, {self._file_path!r}'
             ')'
+        )
+
+    def __str__(self, /) -> str:
+        return (
+            f'{self._json_path} section of '
+            f'{self._file_path.as_posix()} configuration file'
         )
 
 
@@ -163,9 +165,7 @@ class ConfigurationList(Sequence[ConfigurationField[_ElementT]]):
             value = self._raw[index]
         except IndexError:
             raise IndexError(
-                f'"{self._json_path}" list of '
-                f'{self._file_path.as_posix()} configuration file '
-                f'does not contain element with index {index}.'
+                f'{self} does not contain element with index {index}.'
             ) from None
         else:
             return ConfigurationField(
@@ -177,7 +177,7 @@ class ConfigurationList(Sequence[ConfigurationField[_ElementT]]):
     ) -> None:
         self._file_path, self._json_path, self._raw = file_path, json_path, raw
 
-    def __iter__(self) -> Iterator[ConfigurationField[_ElementT]]:
+    def __iter__(self, /) -> Iterator[ConfigurationField[_ElementT]]:
         return (
             ConfigurationField(
                 element, self._json_path.join_index(index), self._file_path
@@ -185,10 +185,16 @@ class ConfigurationList(Sequence[ConfigurationField[_ElementT]]):
             for index, element in enumerate(self._raw)
         )
 
-    def __len__(self) -> int:
+    def __len__(self, /) -> int:
         return len(self._raw)
 
-    def __repr__(self) -> str:
+    def __str__(self, /) -> str:
+        return (
+            f'"{self._json_path}" list of '
+            f'{self._file_path.as_posix()} configuration file'
+        )
+
+    def __repr__(self, /) -> str:
         return (
             f'{type(self).__qualname__}'
             '('
@@ -240,10 +246,10 @@ class JsonPath:
             )
         self._components = components
 
-    def __str__(self) -> str:
+    def __str__(self, /) -> str:
         return ''.join(self._components)
 
-    def __repr__(self) -> str:
+    def __repr__(self, /) -> str:
         return (
             f'{type(self).__qualname__}'
             f'({", ".join(map(repr, self._components))})'
