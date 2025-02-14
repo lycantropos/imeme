@@ -98,9 +98,7 @@ class SyncTarget(str, enum.Enum):
         dir_okay=False, exists=True, file_okay=True, path_type=Path
     ),
 )
-@click.argument(
-    'targets', nargs=-1, required=True, type=click.Choice(tuple(SyncTarget))
-)
+@click.argument('targets', nargs=-1, type=click.Choice(tuple(SyncTarget)))
 @main.command
 @click.pass_obj
 def sync(
@@ -118,7 +116,12 @@ def sync(
     if len(peers_list) == 0:
         raise ValueError(f'Invalid {peers_list}: should not be empty.')
     peers = [peer.extract_exact(RawPeer) for peer in peers_list]
-    if SyncTarget.MESSAGES in targets:
+    sync_all = len(targets) == 0
+    if sync_all or SyncTarget.MESSAGES in targets:
+        telegram_cache_directory_path = (
+            context.cache_directory_path / 'telegram'
+        )
+        telegram_cache_directory_path.mkdir(exist_ok=True)
         asyncio.run(
             sync_messages(
                 peers,
@@ -128,7 +131,7 @@ def sync(
                 api_hash=telegram_configuration_section[
                     'api_hash'
                 ].extract_exact(str),
-                cache_directory_path=context.cache_directory_path,
+                cache_directory_path=telegram_cache_directory_path,
                 logger=context.logger,
             )
         )
