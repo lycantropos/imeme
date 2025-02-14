@@ -396,6 +396,10 @@ async def _sync_peer_message_batch(
             DefaultMapping(open_cache_file)
         )
         message_counter = 0
+        message_chunk_start_count = 0
+        message_chunk_start_date: dt.date | None = (
+            message_batch_limits.start_date
+        )
         message_chunk_stop_date: dt.date | None = (
             message_batch_limits.stop_date
         )
@@ -431,13 +435,26 @@ async def _sync_peer_message_batch(
                             'Finished synchronization of (%s, %s] '
                             'messages for %s from %s to %s.'
                         ),
-                        message_counter - _MESSAGE_CHUNK_SIZE,
+                        message_chunk_start_count,
                         message_counter,
                         peer,
                         message_chunk_start_date,
                         message_chunk_stop_date,
                     )
                     message_chunk_stop_date = message_chunk_start_date
+                    message_chunk_start_count = message_counter
+        if message_counter > 0:
+            logger.debug(
+                (
+                    'Finished synchronization of (%s, %s] '
+                    'messages for %s from %s to %s.'
+                ),
+                message_chunk_start_count,
+                message_counter,
+                peer,
+                message_chunk_start_date,
+                message_chunk_stop_date,
+            )
 
 
 async def _sync_peer_messages(
