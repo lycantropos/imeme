@@ -15,6 +15,16 @@ RawPeer: TypeAlias = str | int
 
 
 class Peer:
+    @classmethod
+    async def from_raw(
+        cls, raw: RawPeer, /, *, client: TelegramClient
+    ) -> Self:
+        input_peer = await client.get_input_entity(raw)
+        if isinstance(input_peer, InputPeerSelf):
+            input_peer = await client.get_me(input_peer=True)
+            assert isinstance(input_peer, InputPeerUser), input_peer
+        return cls(get_peer_id(input_peer), input_peer)
+
     @property
     def id(self, /) -> int:
         return self._id
@@ -25,18 +35,7 @@ class Peer:
 
     _id: int
     _input_peer: TypeInputPeer
-
     __slots__ = '_id', '_input_peer'
-
-    @classmethod
-    async def from_raw(
-        cls, raw: RawPeer, /, *, client: TelegramClient
-    ) -> Self:
-        input_peer = await client.get_input_entity(raw)
-        if isinstance(input_peer, InputPeerSelf):
-            input_peer = await client.get_me(input_peer=True)
-            assert isinstance(input_peer, InputPeerUser), input_peer
-        return cls(get_peer_id(input_peer), input_peer)
 
     def __new__(cls, id_: int, input_peer: TypeInputPeer, /) -> Self:
         self = super().__new__(cls)
