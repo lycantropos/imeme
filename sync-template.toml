@@ -2,8 +2,12 @@
 api_id = 12345 # get your own `api_id` from https://my.telegram.org/apps
 api_hash = "1234567890abcdef1234567890abcdef" # get your own `api_hash` from https://my.telegram.org/apps
 peers = [
+    # Saved messages
     "me",
+    # Du Rove's Channel handle
     "durov",
-    777000,
+    # Du Rove's Channel id
     -1001006503122,
+    # Telegram service notifications
+    777000,
 ]
