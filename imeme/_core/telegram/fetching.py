@@ -33,15 +33,19 @@ from .peer import Peer
 async def fetch_newest_peer_message(
     peer: Peer, /, *, client: TelegramClient
 ) -> Message:
-    return await anext(client.iter_messages(peer.input_peer, limit=1))
+    async for candidate in client.iter_messages(peer.input_peer):
+        if isinstance(candidate, Message):
+            return candidate
+    raise ValueError('No messages found.')
 
 
 async def fetch_oldest_peer_message(
     peer: Peer, /, *, client: TelegramClient
 ) -> Message:
-    return await anext(
-        client.iter_messages(peer.input_peer, limit=1, reverse=True)
-    )
+    async for candidate in client.iter_messages(peer.input_peer, reverse=True):
+        if isinstance(candidate, Message):
+            return candidate
+    raise ValueError('No messages found.')
 
 
 async def fetch_message_media(

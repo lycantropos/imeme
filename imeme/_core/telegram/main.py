@@ -283,11 +283,11 @@ async def _sync_peer_images(
     peer = await Peer.from_raw(raw_peer, client=client)
     oldest_message = await fetch_oldest_peer_message(peer, client=client)
     older_date = (
-        oldest_message_datetime.date()
+        oldest_message_datetime.date() - dt.timedelta(days=1)
         if (oldest_message_datetime := oldest_message.date) is not None
         else _MIN_TELEGRAM_MESSAGE_DATE
     )
-    older_highest_message_id = oldest_message.id
+    older_highest_message_id = oldest_message.id - 1
     older_lowest_message_id = 0
     message_batches_cache_directory_path = cache_directory_path / str(peer.id)
     message_batches_cache_directory_path.mkdir(exist_ok=True)
