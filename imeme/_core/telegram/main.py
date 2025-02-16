@@ -25,10 +25,10 @@ from telethon.tl.types import (  # type: ignore[import-untyped]
 from imeme._core.utils import reverse_byte_stream
 
 from .constants import (
-    _MESSAGE_CACHE_DIRECTORY_NAME_FORMAT,
-    _MESSAGE_CACHE_FILE_NAME,
-    _MESSAGE_CACHE_FILE_SEPARATOR,
-    _MESSAGE_CACHE_HASH_FILE_NAME,
+    MESSAGE_CACHE_DIRECTORY_NAME_FORMAT,
+    MESSAGE_CACHE_FILE_NAME,
+    MESSAGE_CACHE_FILE_SEPARATOR,
+    MESSAGE_CACHE_HASH_FILE_NAME,
 )
 from .fetching import (
     fetch_message_media,
@@ -87,7 +87,7 @@ def _calculate_file_hash(
 
 def _deserialize_peer_message_line(value: bytes, /) -> Message:
     result = BinaryReader(
-        base64.b64decode(value[: -len(_MESSAGE_CACHE_FILE_SEPARATOR)])
+        base64.b64decode(value[: -len(MESSAGE_CACHE_FILE_SEPARATOR)])
     ).tgread_object()
     if not isinstance(result, Message):
         raise TypeError(result)
@@ -132,7 +132,7 @@ def _load_newest_cached_peer_message(file: IO[bytes], /) -> Message:
 
 def _load_oldest_cached_peer_message(file: IO[bytes], /) -> Message:
     reversed_message_lines = reverse_byte_stream(
-        file, lines_separator=_MESSAGE_CACHE_FILE_SEPARATOR
+        file, lines_separator=MESSAGE_CACHE_FILE_SEPARATOR
     )
     result = _deserialize_peer_message_line(next(reversed_message_lines))
     try:
@@ -205,9 +205,7 @@ async def _sync_message_image(
     )
     image_cache_directory_path = (
         message_batches_cache_directory_path
-        / message_datetime.date().strftime(
-            _MESSAGE_CACHE_DIRECTORY_NAME_FORMAT
-        )
+        / message_datetime.date().strftime(MESSAGE_CACHE_DIRECTORY_NAME_FORMAT)
     )
     if isinstance(message_media, MessageMediaPhoto):
         message_photo = message_media.photo
@@ -300,7 +298,7 @@ async def _sync_peer_images(
                 and (
                     (
                         date := _safe_parse_date(
-                            path.name, _MESSAGE_CACHE_DIRECTORY_NAME_FORMAT
+                            path.name, MESSAGE_CACHE_DIRECTORY_NAME_FORMAT
                         )
                     )
                     is not None
@@ -309,7 +307,7 @@ async def _sync_peer_images(
         ]
     ):
         candidate_message_cache_file_path = (
-            candidate_message_cache_directory_path / _MESSAGE_CACHE_FILE_NAME
+            candidate_message_cache_directory_path / MESSAGE_CACHE_FILE_NAME
         )
         try:
             candidate_message_cache_file = (
@@ -320,7 +318,7 @@ async def _sync_peer_images(
         with candidate_message_cache_file:
             candidate_message_cache_hash_file_path = (
                 candidate_message_cache_directory_path
-                / _MESSAGE_CACHE_HASH_FILE_NAME
+                / MESSAGE_CACHE_HASH_FILE_NAME
             )
             try:
                 expected_candidate_message_cache_file_hash = (

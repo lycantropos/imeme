@@ -22,10 +22,10 @@ from telethon.tl.types import (  # type: ignore[import-untyped]
 from imeme._core.utils import DefaultMapping
 
 from .constants import (
-    _MESSAGE_CACHE_DIRECTORY_NAME_FORMAT,
-    _MESSAGE_CACHE_FILE_NAME,
-    _MESSAGE_CACHE_FILE_SEPARATOR,
-    _MESSAGE_CACHE_HASH_FILE_NAME,
+    MESSAGE_CACHE_DIRECTORY_NAME_FORMAT,
+    MESSAGE_CACHE_FILE_NAME,
+    MESSAGE_CACHE_FILE_SEPARATOR,
+    MESSAGE_CACHE_HASH_FILE_NAME,
 )
 from .peer import Peer
 
@@ -79,11 +79,11 @@ async def fetch_peer_messages_with_caching(
         def get_cache_writer(message_date: dt.date, /) -> _BytesWriter:
             message_cache_directory_path = (
                 message_batches_cache_directory_path
-                / message_date.strftime(_MESSAGE_CACHE_DIRECTORY_NAME_FORMAT)
+                / message_date.strftime(MESSAGE_CACHE_DIRECTORY_NAME_FORMAT)
             )
             message_cache_directory_path.mkdir(exist_ok=True)
             message_cache_file_path = (
-                message_cache_directory_path / _MESSAGE_CACHE_FILE_NAME
+                message_cache_directory_path / MESSAGE_CACHE_FILE_NAME
             )
             stack.pop_all().close()
             hasher = hashlib.sha256()
@@ -91,7 +91,7 @@ async def fetch_peer_messages_with_caching(
                 write_message_cache_file_hash_on_success(
                     hasher,
                     message_cache_directory_path
-                    / _MESSAGE_CACHE_HASH_FILE_NAME,
+                    / MESSAGE_CACHE_HASH_FILE_NAME,
                 )
             )
             message_cache_file = stack.enter_context(
@@ -223,11 +223,11 @@ async def _sync_message(
     message: Message, *, messages_cache_writers: Mapping[dt.date, _BytesWriter]
 ) -> None:
     message_bytes = _serialize_peer_message(message)
-    assert _MESSAGE_CACHE_FILE_SEPARATOR not in message_bytes, message_bytes
+    assert MESSAGE_CACHE_FILE_SEPARATOR not in message_bytes, message_bytes
     message_datetime = message.date
     assert message_datetime is not None, (
         f'Message {message.to_json()} has unset date.'
     )
     messages_cache_writers[message_datetime.date()](
-        message_bytes + _MESSAGE_CACHE_FILE_SEPARATOR
+        message_bytes + MESSAGE_CACHE_FILE_SEPARATOR
     )
