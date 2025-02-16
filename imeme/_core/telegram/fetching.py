@@ -30,6 +30,14 @@ from .constants import (
 from .peer import Peer
 
 
+async def fetch_message_media(
+    message_media: TypeMessageMedia, /, *, client: TelegramClient
+) -> bytes:
+    result = await client.download_media(message_media, bytes)  # type: ignore[arg-type,unused-ignore]
+    assert isinstance(result, bytes), message_media
+    return result
+
+
 async def fetch_newest_peer_message(
     peer: Peer, /, *, client: TelegramClient
 ) -> Message:
@@ -46,14 +54,6 @@ async def fetch_oldest_peer_message(
         if isinstance(candidate, Message):
             return candidate
     raise ValueError('No messages found.')
-
-
-async def fetch_message_media(
-    message_media: TypeMessageMedia, /, *, client: TelegramClient
-) -> bytes:
-    result = await client.download_media(message_media, bytes)  # type: ignore[arg-type,unused-ignore]
-    assert isinstance(result, bytes), message_media
-    return result
 
 
 async def fetch_peer_messages_with_caching(
