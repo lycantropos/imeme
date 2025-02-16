@@ -7,7 +7,7 @@ import logging
 import os
 from collections.abc import Callable
 from pathlib import Path
-from typing import IO, Final
+from typing import Final, IO
 
 from telethon import TelegramClient  # type: ignore[import-untyped]
 from telethon.errors import BadRequestError  # type: ignore[import-untyped]
