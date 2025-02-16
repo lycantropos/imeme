@@ -115,7 +115,7 @@ def sync(
     peers_list = telegram_configuration_section.get_list('peers')
     if len(peers_list) == 0:
         raise ValueError(f'Invalid {peers_list}: should not be empty.')
-    peers = [peer.extract_exact(RawPeer) for peer in peers_list]
+    raw_peers = [peer.extract_exact(RawPeer) for peer in peers_list]
     sync_all = len(targets) == 0
     if sync_all or SyncTarget.IMAGES in targets:
         telegram_cache_directory_path = (
@@ -124,7 +124,7 @@ def sync(
         telegram_cache_directory_path.mkdir(exist_ok=True)
         asyncio.run(
             sync_images(
-                peers,
+                raw_peers,
                 api_id=telegram_configuration_section['api_id'].extract_exact(
                     int
                 ),
