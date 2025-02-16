@@ -30,6 +30,12 @@ from .constants import (
 from .peer import Peer
 
 
+async def fetch_newest_peer_message(
+    peer: Peer, /, *, client: TelegramClient
+) -> Message:
+    return await anext(client.iter_messages(peer.input_peer, limit=1))
+
+
 async def fetch_oldest_peer_message(
     peer: Peer, /, *, client: TelegramClient
 ) -> Message:
@@ -135,10 +141,10 @@ async def fetch_peer_messages_with_caching(
                     )
                     logger.debug(
                         (
-                            'Finished loading of (%s, %s] messages '
+                            'Finished loading of messages %s - %s '
                             'for %s from %s to %s.'
                         ),
-                        message_chunk_start_count,
+                        message_chunk_start_count + 1,
                         message_counter,
                         peer,
                         message_chunk_start_date,
@@ -148,8 +154,8 @@ async def fetch_peer_messages_with_caching(
                     message_chunk_start_count = message_counter
         if message_counter > 0:
             logger.debug(
-                'Finished loading of (%s, %s] messages for %s from %s to %s.',
-                message_chunk_start_count,
+                'Finished loading of messages %s - %s for %s from %s to %s.',
+                message_chunk_start_count + 1,
                 message_counter,
                 peer,
                 message_chunk_start_date,

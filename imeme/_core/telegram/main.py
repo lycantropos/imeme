@@ -33,6 +33,7 @@ from .constants import (
 )
 from .fetching import (
     fetch_message_media,
+    fetch_newest_peer_message,
     fetch_oldest_peer_message,
     fetch_peer_messages_with_caching,
 )
@@ -286,8 +287,8 @@ async def _sync_peer_images(
         if (oldest_message_datetime := oldest_message.date) is not None
         else _MIN_TELEGRAM_MESSAGE_DATE
     )
-    older_lowest_message_id = 0
     older_highest_message_id = oldest_message.id
+    older_lowest_message_id = 0
     message_batches_cache_directory_path = cache_directory_path / str(peer.id)
     message_batches_cache_directory_path.mkdir(exist_ok=True)
     for candidate_date, candidate_message_cache_directory_path in sorted(
@@ -412,26 +413,28 @@ async def _sync_peer_images(
             older_date = candidate_date
             older_highest_message_id = candidate_highest_message_id
             older_lowest_message_id = candidate_lowest_message_id
-    async for message in fetch_peer_messages_with_caching(
-        peer,
-        client=client,
-        logger=logger,
-        message_batches_cache_directory_path=(
-            message_batches_cache_directory_path
-        ),
-        start_message_id=older_lowest_message_id,
-        start_message_date=older_date,
-        stop_message_id=0,
-        stop_message_date=_MAX_TELEGRAM_MESSAGE_DATE,
-    ):
-        await _safe_sync_message_image(
-            message,
+    newest_message = await fetch_newest_peer_message(peer, client=client)
+    if newest_message.id != older_highest_message_id:
+        async for message in fetch_peer_messages_with_caching(
+            peer,
             client=client,
             logger=logger,
             message_batches_cache_directory_path=(
                 message_batches_cache_directory_path
             ),
-        )
+            start_message_id=older_lowest_message_id,
+            start_message_date=older_date,
+            stop_message_id=0,
+            stop_message_date=_MAX_TELEGRAM_MESSAGE_DATE,
+        ):
+            await _safe_sync_message_image(
+                message,
+                client=client,
+                logger=logger,
+                message_batches_cache_directory_path=(
+                    message_batches_cache_directory_path
+                ),
+            )
 
 
 _to_hasher: Callable[..., hashlib._Hash] = hashlib.sha256
