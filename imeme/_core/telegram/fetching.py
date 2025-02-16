@@ -9,7 +9,7 @@ from collections.abc import AsyncIterator, Callable, Generator, Mapping
 from contextlib import ExitStack
 from functools import partial
 from pathlib import Path
-from typing import IO, Final, TypeAlias
+from typing import Final, IO, TypeAlias
 
 from telethon import TelegramClient  # type: ignore[import-untyped]
 from telethon.tl.types import (  # type: ignore[import-untyped]
@@ -125,7 +125,7 @@ async def fetch_peer_messages_with_caching(
             stop_message_id=stop_message_id,
         ):
             try:
-                await _sync_message(
+                _sync_message(
                     message, messages_cache_writers=messages_cache_writers
                 )
             except Exception:
@@ -219,7 +219,7 @@ def _serialize_peer_message(value: Message, /) -> bytes:
     return base64.b64encode(bytes(value))
 
 
-async def _sync_message(
+def _sync_message(
     message: Message, *, messages_cache_writers: Mapping[dt.date, _BytesWriter]
 ) -> None:
     message_bytes = _serialize_peer_message(message)
