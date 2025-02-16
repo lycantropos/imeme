@@ -1,6 +1,9 @@
 from typing import TypeAlias
 
-from . import messages as _messages
+import imeme._core.telegram.fetching
+import imeme._core.telegram.peer
 
-RawPeer: TypeAlias = _messages.RawPeer
-sync_messages = _messages.sync_messages
+from . import main as _messages
+
+RawPeer: TypeAlias = imeme._core.telegram.peer.RawPeer
+sync_images = _messages.sync_images

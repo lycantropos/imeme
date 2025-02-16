@@ -2,11 +2,11 @@ import io
 import itertools
 import operator
 from collections.abc import Iterator
-from typing import BinaryIO
+from typing import IO
 
 
 def reverse_byte_stream(
-    value: BinaryIO,
+    value: IO[bytes],
     /,
     *,
     batch_size: int = io.DEFAULT_BUFFER_SIZE,
@@ -79,7 +79,7 @@ def reverse_byte_stream(
 
 
 def read_batch_from_end(
-    byte_stream: BinaryIO, *, size: int, end_position: int
+    byte_stream: IO[bytes], *, size: int, end_position: int
 ) -> bytes:
     if end_position > size:
         offset = end_position - size

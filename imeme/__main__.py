@@ -10,7 +10,7 @@ from typing_extensions import Self
 
 import imeme
 from imeme._core.configuration import Configuration
-from imeme._core.telegram import RawPeer, sync_messages
+from imeme._core.telegram import RawPeer, sync_images
 
 
 class Context:
@@ -87,7 +87,7 @@ def main(
 
 
 class SyncTarget(str, enum.Enum):
-    MESSAGES = 'messages'
+    IMAGES = 'images'
 
 
 @click.option(
@@ -117,13 +117,13 @@ def sync(
         raise ValueError(f'Invalid {peers_list}: should not be empty.')
     peers = [peer.extract_exact(RawPeer) for peer in peers_list]
     sync_all = len(targets) == 0
-    if sync_all or SyncTarget.MESSAGES in targets:
+    if sync_all or SyncTarget.IMAGES in targets:
         telegram_cache_directory_path = (
             context.cache_directory_path / 'telegram'
         )
         telegram_cache_directory_path.mkdir(exist_ok=True)
         asyncio.run(
-            sync_messages(
+            sync_images(
                 peers,
                 api_id=telegram_configuration_section['api_id'].extract_exact(
                     int
