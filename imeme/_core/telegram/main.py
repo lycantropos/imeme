@@ -22,7 +22,6 @@ from telethon.tl.types import (  # type: ignore[import-untyped]
     PhotoSizeProgressive,
 )
 
-from imeme._core.telegram.peer import Peer, RawPeer
 from imeme._core.utils import reverse_byte_stream
 
 from .constants import (
@@ -37,6 +36,7 @@ from .fetching import (
     fetch_oldest_peer_message,
     fetch_peer_messages_with_caching,
 )
+from .peer import Peer, RawPeer
 
 
 async def sync_images(
