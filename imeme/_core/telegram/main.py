@@ -2,12 +2,18 @@ from __future__ import annotations
 
 import base64
 import datetime as dt
-import hashlib
 import logging
+import multiprocessing
 import os
-from collections.abc import Callable
+import unicodedata
+from collections import Counter
+from collections.abc import Iterable
+from concurrent.futures import as_completed
+from concurrent.futures.process import ProcessPoolExecutor
+from logging.handlers import QueueHandler, QueueListener
 from pathlib import Path
-from typing import Final, IO
+from queue import Queue
+from typing import Any, Final, IO
 
 from telethon import TelegramClient  # type: ignore[import-untyped]
 from telethon.errors import BadRequestError  # type: ignore[import-untyped]
@@ -22,6 +28,9 @@ from telethon.tl.types import (  # type: ignore[import-untyped]
     PhotoSizeProgressive,
 )
 
+from imeme._core.caching import calculate_file_hash, to_hasher
+from imeme._core.language import LanguageCategory
+from imeme._core.text_recognition import sync_image_ocr
 from imeme._core.utils import reverse_byte_stream
 
 from .constants import (
@@ -36,53 +45,250 @@ from .fetching import (
     fetch_oldest_peer_message,
     fetch_peer_messages_with_caching,
 )
-from .peer import Peer, RawPeer
+from .peer import Peer
+
+
+def classify_peer_language(
+    peer: Peer, /, *, cache_directory_path: Path, default: LanguageCategory
+) -> LanguageCategory:
+    character_categories_counter = (
+        Counter()
+        if peer.display_name is None
+        else Counter(_string_to_raw_categories(peer.display_name))
+    )
+    for message in _iter_cached_peer_messages(
+        peer, cache_directory_path=cache_directory_path
+    ):
+        character_categories_counter.update(
+            _string_to_raw_categories(message.message)
+        )
+    try:
+        candidate_count, candidate_raw_language_category = max(
+            (value, key)
+            for key, value in character_categories_counter.items()
+            if any(key == category.value for category in LanguageCategory)
+        )
+    except ValueError:
+        return default
+    else:
+        if 2 * candidate_count > character_categories_counter.total():
+            return LanguageCategory(candidate_raw_language_category)
+        return default
 
 
 async def sync_images(
-    raw_peers: list[RawPeer],
+    peers: list[Peer],
     /,
     *,
-    api_id: int,
-    api_hash: str,
+    client: TelegramClient,
     cache_directory_path: Path,
     logger: logging.Logger,
 ) -> None:
-    client: TelegramClient
-    async with TelegramClient(str(api_id), api_id, api_hash) as client:
-        for raw_peer in raw_peers:
-            logger.info('Starting images synchronization for %r.', raw_peer)
+    for peer in peers:
+        logger.info('Starting images synchronization for %s.', peer)
+        try:
+            await _sync_peer_images(
+                peer,
+                client=client,
+                logger=logger,
+                cache_directory_path=cache_directory_path,
+            )
+        except Exception:
+            logger.exception('Failed images synchronization for %s.', peer)
+            continue
+        else:
+            logger.info(
+                'Successfully finished images synchronization for %s.', peer
+            )
+
+
+def sync_images_ocr(
+    peers: list[Peer],
+    /,
+    *,
+    cache_directory_path: Path,
+    default_language_category: LanguageCategory,
+    logger: logging.Logger,
+) -> None:
+    max_subprocesses_count = max((os.cpu_count() or 1) - 2, 1)
+    logger.debug(
+        '%s-process images OCR synchronization', max_subprocesses_count
+    )
+    if max_subprocesses_count == 1:
+        log_queue: Queue[Any] = Queue()
+        listener = QueueListener(log_queue, *logger.handlers)
+        listener.start()
+        for peer in peers:
+            _sync_peer_images_ocr(
+                peer,
+                cache_directory_path=cache_directory_path,
+                default_language_category=default_language_category,
+                log_queue=log_queue,
+                logger_level=logger.level,
+                logger_name=logger.name,
+            )
+        logger.debug('Waiting for listener thread to finish...')
+        listener.stop()
+    else:
+        with (
+            ProcessPoolExecutor(max_subprocesses_count) as pool,
+            multiprocessing.Manager() as manager,
+        ):
+            log_queue = manager.Queue()
+            listener = QueueListener(log_queue, *logger.handlers)
+            listener.start()
+            for future in as_completed(
+                [
+                    pool.submit(
+                        _sync_peer_images_ocr,
+                        peer,
+                        cache_directory_path=cache_directory_path,
+                        default_language_category=default_language_category,
+                        log_queue=log_queue,
+                        logger_level=logger.level,
+                        logger_name=f'process-{index}',
+                    )
+                    for index, peer in enumerate(peers)
+                ]
+            ):
+                try:
+                    result = future.result()
+                except Exception:
+                    logger.exception(
+                        'Failed images OCR synchronization, skipping.'
+                    )
+                    continue
+                else:
+                    assert result is None, result
+            logger.debug('Waiting for listener thread to finish...')
+            listener.stop()
+
+
+def _iter_cached_peer_image_file_paths(
+    peer: Peer, /, *, cache_directory_path: Path
+) -> Iterable[Path]:
+    message_batches_cache_directory_path = cache_directory_path / str(peer.id)
+    for message in _iter_cached_peer_messages(
+        peer, cache_directory_path=cache_directory_path
+    ):
+        message_media = message.media
+        message_datetime = message.date
+        if message_datetime is None:
+            continue
+        image_cache_directory_path = (
+            message_batches_cache_directory_path
+            / message_datetime.date().strftime(
+                MESSAGE_CACHE_DIRECTORY_NAME_FORMAT
+            )
+        )
+        if isinstance(message_media, MessageMediaPhoto):
+            message_photo = message_media.photo
+            assert isinstance(message_photo, Photo), message
+            image_cache_file_name_without_extension = (
+                f'{message.id}_{message_photo.id}'
+            )
+            image_cache_file_path = (
+                image_cache_directory_path
+                / f'{image_cache_file_name_without_extension}.jpg'
+            )
+            image_cache_hash_file_path = (
+                image_cache_directory_path
+                / f'{image_cache_file_name_without_extension}.hash'
+            )
+            if _is_file_in_cache(
+                cache_file_path=image_cache_file_path,
+                cache_hash_file_path=image_cache_hash_file_path,
+                file_size=_photo_to_image_file_size(message_photo),
+            ):
+                yield image_cache_file_path
+        elif isinstance(message_media, MessageMediaDocument):
+            message_document = message_media.document
+            assert isinstance(message_document, Document), message
+            message_document_mime_type = message_document.mime_type
+            if message_document_mime_type.startswith(
+                _IMAGE_DOCUMENT_MIME_TYPE_PREFIX
+            ):
+                image_cache_file_name_without_extension = (
+                    f'{message.id}_{message_document.id}'
+                )
+                image_cache_file_extension = message_document_mime_type[
+                    len(_IMAGE_DOCUMENT_MIME_TYPE_PREFIX) :
+                ]
+                image_cache_file_path = image_cache_directory_path / (
+                    f'{image_cache_file_name_without_extension}'
+                    f'.{image_cache_file_extension}'
+                )
+                image_cache_hash_file_path = (
+                    image_cache_directory_path
+                    / f'{image_cache_file_name_without_extension}.hash'
+                )
+                if _is_file_in_cache(
+                    cache_file_path=image_cache_file_path,
+                    cache_hash_file_path=image_cache_hash_file_path,
+                    file_size=message_document.size,
+                ):
+                    yield image_cache_file_path
+
+
+def _iter_cached_peer_messages(
+    peer: Peer, /, *, cache_directory_path: Path
+) -> Iterable[Message]:
+    message_batches_cache_directory_path = cache_directory_path / str(peer.id)
+    message_batches_cache_directory_path.mkdir(exist_ok=True)
+    for _, candidate_message_cache_directory_path in sorted(
+        [
+            (date, path)
+            for path in message_batches_cache_directory_path.iterdir()
+            if (
+                path.is_dir()
+                and (
+                    (
+                        date := _safe_parse_date(
+                            path.name, MESSAGE_CACHE_DIRECTORY_NAME_FORMAT
+                        )
+                    )
+                    is not None
+                )
+            )
+        ]
+    ):
+        candidate_message_cache_file_path = (
+            candidate_message_cache_directory_path / MESSAGE_CACHE_FILE_NAME
+        )
+        try:
+            candidate_message_cache_file = (
+                candidate_message_cache_file_path.open('rb')
+            )
+        except OSError:
+            continue
+        with candidate_message_cache_file:
+            candidate_message_cache_hash_file_path = (
+                candidate_message_cache_directory_path
+                / MESSAGE_CACHE_HASH_FILE_NAME
+            )
             try:
-                await _sync_peer_images(
-                    raw_peer,
-                    client=client,
-                    logger=logger,
-                    cache_directory_path=cache_directory_path,
-                )
-            except Exception:
-                logger.exception(
-                    'Failed images synchronization for %r.', raw_peer
-                )
+                expected_candidate_message_cache_file_hash = (
+                    candidate_message_cache_hash_file_path
+                ).read_bytes()
+            except OSError:
                 continue
-            else:
-                logger.info(
-                    'Successfully finished images synchronization for %r.',
-                    raw_peer,
-                )
+            if _candidate_message_cache_file_has_invalid_hash := (
+                calculate_file_hash(candidate_message_cache_file)
+                != expected_candidate_message_cache_file_hash
+            ):
+                continue
+            candidate_message_cache_file.seek(0)
+            for message_line in candidate_message_cache_file:
+                try:
+                    yield _deserialize_peer_message_line(message_line)
+                except Exception:
+                    continue
 
 
 _IMAGE_DOCUMENT_MIME_TYPE_PREFIX: Final[str] = 'image/'
+_IMAGE_OCR_CHUNK_SIZE: Final[int] = 20
 _MAX_TELEGRAM_MESSAGE_DATE: Final[dt.date] = dt.date.max
 _MIN_TELEGRAM_MESSAGE_DATE: Final[dt.date] = dt.date(2013, 1, 1)
-
-
-def _calculate_file_hash(
-    file: IO[bytes], /, chunk_bytes_count: int = 4096
-) -> bytes:
-    hasher = _to_hasher()
-    for byte_block in iter(lambda: file.read(chunk_bytes_count), b''):
-        hasher.update(byte_block)
-    return hasher.digest()
 
 
 def _deserialize_peer_message_line(value: bytes, /) -> Message:
@@ -109,8 +315,7 @@ def _is_file_in_cache(
                 pass
             else:
                 if (
-                    _calculate_file_hash(cache_file)
-                    == expected_cache_file_hash
+                    calculate_file_hash(cache_file) == expected_cache_file_hash
                 ) and (cache_file.seek(0, os.SEEK_END) == file_size):
                     return True
     return False
@@ -191,6 +396,14 @@ async def _safe_sync_message_image(
         )
 
 
+def _string_to_raw_categories(value: str, /) -> Iterable[str]:
+    return [
+        unicodedata.name(character).split(maxsplit=1)[0].lower()
+        for character in value
+        if character.isalpha()
+    ]
+
+
 async def _sync_message_image(
     message: Message,
     /,
@@ -230,9 +443,7 @@ async def _sync_message_image(
         image_bytes = await fetch_message_media(message_media, client=client)
         image_cache_directory_path.mkdir(exist_ok=True)
         image_cache_file_path.write_bytes(image_bytes)
-        image_cache_hash_file_path.write_bytes(
-            _to_hasher(image_bytes).digest()
-        )
+        image_cache_hash_file_path.write_bytes(to_hasher(image_bytes).digest())
     elif isinstance(message_media, MessageMediaDocument):
         message_document = message_media.document
         assert isinstance(message_document, Document), message
@@ -266,19 +477,18 @@ async def _sync_message_image(
             image_cache_directory_path.mkdir(exist_ok=True)
             image_cache_file_path.write_bytes(image_bytes)
             image_cache_hash_file_path.write_bytes(
-                _to_hasher(image_bytes).digest()
+                to_hasher(image_bytes).digest()
             )
 
 
 async def _sync_peer_images(
-    raw_peer: RawPeer,
+    peer: Peer,
     /,
     *,
     client: TelegramClient,
     logger: logging.Logger,
     cache_directory_path: Path,
 ) -> None:
-    peer = await Peer.from_raw(raw_peer, client=client)
     oldest_message = await fetch_oldest_peer_message(peer, client=client)
     older_date = (
         oldest_message_datetime.date() - dt.timedelta(days=1)
@@ -327,7 +537,7 @@ async def _sync_peer_images(
             except OSError:
                 continue
             if _candidate_message_cache_file_has_invalid_hash := (
-                _calculate_file_hash(candidate_message_cache_file)
+                calculate_file_hash(candidate_message_cache_file)
                 != expected_candidate_message_cache_file_hash
             ):
                 continue
@@ -435,4 +645,61 @@ async def _sync_peer_images(
             )
 
 
-_to_hasher: Callable[..., hashlib._Hash] = hashlib.sha256
+def _sync_peer_images_ocr(
+    peer: Peer,
+    /,
+    *,
+    cache_directory_path: Path,
+    default_language_category: LanguageCategory,
+    log_queue: Queue[Any],
+    logger_level: int,
+    logger_name: str,
+) -> None:
+    logger = logging.getLogger(logger_name)
+    queue_handler = QueueHandler(log_queue)
+    logger.addHandler(queue_handler)
+    logger.setLevel(logger_level)
+    logger.info('Starting images OCR for %s.', peer)
+    language_category = classify_peer_language(
+        peer,
+        cache_directory_path=cache_directory_path,
+        default=default_language_category,
+    )
+    logger.debug(
+        'Detected language category %r for %s', language_category, peer
+    )
+    image_chunk_start_count = image_counter = 0
+    for image_counter, image_file_path in enumerate(
+        _iter_cached_peer_image_file_paths(
+            peer, cache_directory_path=cache_directory_path
+        ),
+        start=1,
+    ):
+        try:
+            sync_image_ocr(
+                image_file_path, language_category=language_category
+            )
+        except Exception:
+            logger.debug(
+                'Failed OCR of image with path %s for %s, skipping.',
+                image_file_path,
+                peer,
+            )
+            continue
+        finally:
+            if image_counter % _IMAGE_OCR_CHUNK_SIZE == 0:
+                logger.debug(
+                    'Finished OCR of images %s - %s for %s.',
+                    image_chunk_start_count + 1,
+                    image_counter,
+                    peer,
+                )
+                image_chunk_start_count = image_counter
+    if image_counter != image_chunk_start_count:
+        logger.debug(
+            'Finished OCR of images %s - %s for %s.',
+            image_chunk_start_count + 1,
+            image_counter,
+            peer,
+        )
+    logger.info('Successfully finished images OCR for %s.', peer)

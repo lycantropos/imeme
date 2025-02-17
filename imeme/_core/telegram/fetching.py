@@ -112,8 +112,7 @@ async def fetch_peer_messages_with_caching(
         messages_cache_writers: DefaultMapping[dt.date, _BytesWriter] = (
             DefaultMapping(get_cache_writer)
         )
-        message_counter = 0
-        message_chunk_start_count = 0
+        message_chunk_start_count = message_counter = 0
         message_chunk_start_date: dt.date | None = start_message_date
         message_chunk_stop_date: dt.date | None = stop_message_date
         async for message in _fetch_peer_messages(
@@ -156,7 +155,7 @@ async def fetch_peer_messages_with_caching(
                     )
                     message_chunk_stop_date = message_chunk_start_date
                     message_chunk_start_count = message_counter
-        if message_counter > 0:
+        if message_counter != message_chunk_start_count:
             logger.debug(
                 'Finished loading of messages %s - %s for %s from %s to %s.',
                 message_chunk_start_count + 1,

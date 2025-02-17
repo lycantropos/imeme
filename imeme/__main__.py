@@ -1,16 +1,19 @@
 import asyncio
 import enum
+import logging
 import logging.config
 from pathlib import Path
 from typing import Any
 
 import click
 import tomli
+from telethon import TelegramClient  # type: ignore[import-untyped]
 from typing_extensions import Self
 
 import imeme
 from imeme._core.configuration import Configuration
-from imeme._core.telegram import RawPeer, sync_images
+from imeme._core.language import LanguageCategory
+from imeme._core.telegram import Peer, RawPeer, sync_images, sync_images_ocr
 
 
 class Context:
@@ -31,7 +34,10 @@ class Context:
         cls, *, cache_directory_path: Path, logger: logging.Logger
     ) -> Self:
         self = super().__new__(cls)
-        self._cache_directory_path, self._logger = cache_directory_path, logger
+        (self._cache_directory_path, self._logger) = (
+            cache_directory_path,
+            logger,
+        )
         return self
 
 
@@ -88,6 +94,7 @@ def main(
 
 class SyncTarget(str, enum.Enum):
     IMAGES = 'images'
+    IMAGE_OCR = 'image_ocr'
 
 
 @click.option(
@@ -115,25 +122,74 @@ def sync(
     peers_list = telegram_configuration_section.get_list('peers')
     if len(peers_list) == 0:
         raise ValueError(f'Invalid {peers_list}: should not be empty.')
-    raw_peers = [peer.extract_exact(RawPeer) for peer in peers_list]
-    sync_all = len(targets) == 0
-    if sync_all or SyncTarget.IMAGES in targets:
-        telegram_cache_directory_path = (
-            context.cache_directory_path / 'telegram'
+    raw_peers: list[RawPeer] = []
+    logger = context.logger
+    for raw_peer_field in peers_list:
+        try:
+            raw_peer = raw_peer_field.extract_exact(RawPeer)
+        except TypeError:
+            logger.exception('Failed raw peer deserialization, skipping.')
+            continue
+        else:
+            raw_peers.append(raw_peer)
+    asyncio.run(
+        _sync(
+            raw_peers,
+            api_id=telegram_configuration_section['api_id'].extract_exact(int),
+            api_hash=telegram_configuration_section['api_hash'].extract_exact(
+                str
+            ),
+            cache_directory_path=context.cache_directory_path,
+            default_language_category=LanguageCategory(
+                telegram_configuration_section[
+                    'default_language_category'
+                ].extract_exact(str)
+            ),
+            logger=logger,
+            targets=targets,
         )
-        telegram_cache_directory_path.mkdir(exist_ok=True)
-        asyncio.run(
-            sync_images(
-                raw_peers,
-                api_id=telegram_configuration_section['api_id'].extract_exact(
-                    int
-                ),
-                api_hash=telegram_configuration_section[
-                    'api_hash'
-                ].extract_exact(str),
+    )
+
+
+async def _sync(
+    raw_peers: list[RawPeer],
+    /,
+    *,
+    api_id: int,
+    api_hash: str,
+    cache_directory_path: Path,
+    default_language_category: LanguageCategory,
+    logger: logging.Logger,
+    targets: list[SyncTarget],
+) -> None:
+    sync_all = len(targets) == 0
+    telegram_cache_directory_path = cache_directory_path / 'telegram'
+    async with TelegramClient(str(api_id), api_id, api_hash) as client:
+        peers: list[Peer] = []
+        for raw_peer in raw_peers:
+            try:
+                peer = await Peer.from_raw(raw_peer, client=client)
+            except Exception:
+                logger.exception(
+                    'Failed resolution of peer %r, skipping.', raw_peer
+                )
+                continue
+            else:
+                peers.append(peer)
+        if sync_all or SyncTarget.IMAGES in targets:
+            telegram_cache_directory_path.mkdir(exist_ok=True)
+            await sync_images(
+                peers,
+                client=client,
                 cache_directory_path=telegram_cache_directory_path,
-                logger=context.logger,
+                logger=logger,
             )
+    if sync_all or SyncTarget.IMAGE_OCR in targets:
+        sync_images_ocr(
+            peers,
+            cache_directory_path=telegram_cache_directory_path,
+            default_language_category=default_language_category,
+            logger=logger,
         )
 
 

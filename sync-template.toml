@@ -11,3 +11,4 @@ peers = [
     # Telegram service notifications
     777000,
 ]
+default_language_category = "latin" # "cyrillic"/"latin"
