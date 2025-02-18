@@ -5,6 +5,7 @@ import datetime as dt
 import logging
 import multiprocessing
 import os
+import re
 import unicodedata
 from collections import Counter
 from collections.abc import Iterable
@@ -54,13 +55,13 @@ def classify_peer_language(
     character_categories_counter = (
         Counter()
         if peer.display_name is None
-        else Counter(_string_to_raw_categories(peer.display_name))
+        else _to_string_raw_categories_counter(peer.display_name)
     )
     for message in _iter_cached_peer_messages(
         peer, cache_directory_path=cache_directory_path
     ):
-        character_categories_counter.update(
-            _string_to_raw_categories(message.message)
+        character_categories_counter += _to_string_raw_categories_counter(
+            message.message
         )
     try:
         candidate_count, candidate_raw_language_category = max(
@@ -397,12 +398,17 @@ async def _safe_sync_message_image(
         )
 
 
-def _string_to_raw_categories(value: str, /) -> Iterable[str]:
-    return [
+def _to_string_raw_categories_counter(
+    value: str,
+    /,
+    *,
+    url_pattern: re.Pattern[str] = re.compile(r'https?://\S+'),
+) -> Counter[str]:
+    return Counter(
         unicodedata.name(character).split(maxsplit=1)[0].lower()
-        for character in value
+        for character in url_pattern.sub('', value)
         if character.isalpha()
-    ]
+    )
 
 
 async def _sync_message_image(
