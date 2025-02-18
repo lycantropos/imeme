@@ -58,7 +58,7 @@ jobs:
           python-version: ${{ matrix.python_version }}
           architecture: ${{ matrix.platform.python_architecture }}
       - name: 'Install in editable mode'
-        run: python -m pip -v install -e .[tests]
+        run: python -m pip -v install -e '.[tests]'
       - name: 'Install coverage dependencies'
         run: python -m pip install -U coverage[toml]
       - name: 'Run doctests'
