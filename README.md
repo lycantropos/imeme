@@ -6,8 +6,8 @@ imeme
 [![](https://img.shields.io/github/license/lycantropos/imeme.svg)](https://github.com/lycantropos/imeme/blob/master/LICENSE "License")
 [![](https://badge.fury.io/py/imeme.svg)](https://badge.fury.io/py/imeme "PyPI")
 
-In what follows `python` is an alias for `python3.10` or `pypy3.10`
-or any later version (`python3.11`, `pypy3.11` and so on).
+In what follows `python` is an alias for `python3.10`
+or any later version (`python3.11` and so on).
 
 Installation
 ------------
