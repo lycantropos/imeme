@@ -109,10 +109,11 @@ def sync_images_ocr(
     cache_directory_path: Path,
     default_language_category: LanguageCategory,
     logger: logging.Logger,
+    max_subprocesses_count: int,
 ) -> None:
-    max_subprocesses_count = max((os.cpu_count() or 1) - 2, 1)
     logger.debug(
-        '%s-process images OCR synchronization', max_subprocesses_count
+        'Starting %s-process images OCR synchronization',
+        max_subprocesses_count,
     )
     if max_subprocesses_count == 1:
         log_queue: Queue[Any] = Queue()
@@ -137,25 +138,25 @@ def sync_images_ocr(
             log_queue = manager.Queue()
             listener = QueueListener(log_queue, *logger.handlers)
             listener.start()
-            for future in as_completed(
-                [
-                    pool.submit(
-                        _sync_peer_images_ocr,
-                        peer,
-                        cache_directory_path=cache_directory_path,
-                        default_language_category=default_language_category,
-                        log_queue=log_queue,
-                        logger_level=logger.level,
-                        logger_name=f'process-{index}',
-                    )
-                    for index, peer in enumerate(peers)
-                ]
-            ):
+            peers_by_futures = {
+                pool.submit(
+                    _sync_peer_images_ocr,
+                    peer,
+                    cache_directory_path=cache_directory_path,
+                    default_language_category=default_language_category,
+                    log_queue=log_queue,
+                    logger_level=logger.level,
+                    logger_name=str(peer),
+                ): peer
+                for peer in peers
+            }
+            for future in as_completed(peers_by_futures.keys()):
                 try:
                     result = future.result()
                 except Exception:
                     logger.exception(
-                        'Failed images OCR synchronization, skipping.'
+                        'Failed images OCR synchronization for %s, skipping.',
+                        peers_by_futures[future],
                     )
                     continue
                 else:
@@ -286,7 +287,7 @@ def _iter_cached_peer_messages(
 
 
 _IMAGE_DOCUMENT_MIME_TYPE_PREFIX: Final[str] = 'image/'
-_IMAGE_OCR_CHUNK_SIZE: Final[int] = 20
+_IMAGE_OCR_CHUNK_SIZE: Final[int] = 4
 _MAX_TELEGRAM_MESSAGE_DATE: Final[dt.date] = dt.date.max
 _MIN_TELEGRAM_MESSAGE_DATE: Final[dt.date] = dt.date(2013, 1, 1)
 

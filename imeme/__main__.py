@@ -2,6 +2,8 @@ import asyncio
 import enum
 import logging
 import logging.config
+import os
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -97,6 +99,20 @@ class SyncTarget(str, enum.Enum):
     IMAGE_OCR = 'image_ocr'
 
 
+def _get_max_available_cpus() -> int:
+    result = None
+    if sys.version_info >= (3, 13):
+        result = os.process_cpu_count()
+    elif sys.platform != 'darwin' and sys.platform != 'win32':
+        result = len(os.sched_getaffinity(0))
+    return result or max(
+        (os.cpu_count() or 1)
+        # 1 for main process + 2 just in case
+        - 3,
+        1,
+    )
+
+
 @click.option(
     '--configuration-file-path',
     default=Path.cwd() / 'sync.toml',
@@ -104,6 +120,12 @@ class SyncTarget(str, enum.Enum):
     type=click.Path(
         dir_okay=False, exists=True, file_okay=True, path_type=Path
     ),
+)
+@click.option(
+    '--max-subprocesses-count',
+    default=_get_max_available_cpus(),
+    help='Maximum number of subprocesses to spawn.',
+    type=click.IntRange(1),
 )
 @click.argument('targets', nargs=-1, type=click.Choice(tuple(SyncTarget)))
 @main.command
@@ -113,6 +135,7 @@ def sync(
     /,
     *,
     configuration_file_path: Path,
+    max_subprocesses_count: int,
     targets: list[SyncTarget],
 ) -> None:
     configuration: Configuration[Any] = Configuration.from_toml_file_path(
@@ -146,6 +169,7 @@ def sync(
                 ].extract_exact(str)
             ),
             logger=logger,
+            max_subprocesses_count=max_subprocesses_count,
             targets=targets,
         )
     )
@@ -160,6 +184,7 @@ async def _sync(
     cache_directory_path: Path,
     default_language_category: LanguageCategory,
     logger: logging.Logger,
+    max_subprocesses_count: int,
     targets: list[SyncTarget],
 ) -> None:
     sync_all = len(targets) == 0
@@ -190,6 +215,7 @@ async def _sync(
             cache_directory_path=telegram_cache_directory_path,
             default_language_category=default_language_category,
             logger=logger,
+            max_subprocesses_count=max_subprocesses_count,
         )
 
 
