@@ -34,7 +34,7 @@ jobs:
     runs-on: ${{ matrix.platform.os }}
     strategy:
       matrix:
-        python_version: [ '3.10', '3.11', '3.12', '3.13' ]
+        python_version: [ '3.10', '3.11', '3.12' ]
         platform: [
           {
             os: 'macos-13',
@@ -114,7 +114,7 @@ jobs:
     needs: build
     strategy:
       matrix:
-        python_version: [ '3.10', '3.11', '3.12', '3.13' ]
+        python_version: [ '3.10', '3.11', '3.12' ]
         platform: [
           {
             os: 'macos-13',
