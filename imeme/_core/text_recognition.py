@@ -4,10 +4,14 @@ from pathlib import Path
 import easyocr  # type: ignore[import-untyped]
 
 from .caching import calculate_file_hash, to_hasher
-from .language import LanguageCategory
+from .language import SupportedLanguage
 
-_ru_en_reader = easyocr.Reader(['ru', 'en'])
-_en_ru_reader = easyocr.Reader(['en', 'ru'])
+_readers = {
+    frozenset(languages): easyocr.Reader(languages)
+    for languages in [['en'], ['en', 'ru']]
+}
+# we assume that ru-segment shares memes from english sources
+_readers[frozenset(['ru'])] = easyocr.Reader(['en', 'ru'])
 
 
 def sync_image_ocr(
@@ -15,7 +19,7 @@ def sync_image_ocr(
     /,
     *,
     encoding: str = 'utf-8',
-    language_category: LanguageCategory,
+    languages: list[SupportedLanguage],
 ) -> None:
     image_ocr_hash_file_path = image_file_path.with_suffix('.ocr.hash')
     with image_file_path.open('rb') as image_file:
@@ -41,11 +45,9 @@ def sync_image_ocr(
         image_ocr_result = json.dumps(
             [
                 [text, confidence]
-                for _, text, confidence in (
-                    _ru_en_reader
-                    if language_category is LanguageCategory.CYRILLIC
-                    else _en_ru_reader
-                ).readtext(image_file.read())
+                for _, text, confidence in _readers[
+                    frozenset(languages)
+                ].readtext(image_file.read())
             ]
         )
         image_ocr_file_path.write_text(image_ocr_result, encoding=encoding)

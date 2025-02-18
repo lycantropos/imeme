@@ -14,7 +14,7 @@ from typing_extensions import Self
 
 import imeme
 from imeme._core.configuration import Configuration
-from imeme._core.language import LanguageCategory
+from imeme._core.language import SupportedLanguage
 from imeme._core.telegram import Peer, RawPeer, sync_images, sync_images_ocr
 
 
@@ -163,11 +163,12 @@ def sync(
                 str
             ),
             cache_directory_path=context.cache_directory_path,
-            default_language_category=LanguageCategory(
-                telegram_configuration_section[
-                    'default_language_category'
-                ].extract_exact(str)
-            ),
+            default_languages=[
+                SupportedLanguage(language_field.extract_exact(str))
+                for language_field in telegram_configuration_section.get_list(
+                    'default_languages'
+                )
+            ],
             logger=logger,
             max_subprocesses_count=max_subprocesses_count,
             targets=targets,
@@ -182,7 +183,7 @@ async def _sync(
     api_id: int,
     api_hash: str,
     cache_directory_path: Path,
-    default_language_category: LanguageCategory,
+    default_languages: list[SupportedLanguage],
     logger: logging.Logger,
     max_subprocesses_count: int,
     targets: list[SyncTarget],
@@ -213,7 +214,7 @@ async def _sync(
         sync_images_ocr(
             peers,
             cache_directory_path=telegram_cache_directory_path,
-            default_language_category=default_language_category,
+            default_languages=default_languages,
             logger=logger,
             max_subprocesses_count=max_subprocesses_count,
         )

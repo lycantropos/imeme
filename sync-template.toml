@@ -11,4 +11,5 @@ peers = [
     # Telegram service notifications
     777000,
 ]
-default_language_category = "latin" # "cyrillic"/"latin"
+# defines default languages for OCR by their ISO 639-1:2002 codes
+default_languages = ["en", "ru"]

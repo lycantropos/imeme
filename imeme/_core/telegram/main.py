@@ -30,7 +30,7 @@ from telethon.tl.types import (  # type: ignore[import-untyped]
 )
 
 from imeme._core.caching import calculate_file_hash, to_hasher
-from imeme._core.language import LanguageCategory
+from imeme._core.language import SupportedLanguage, SupportedLanguageCategory
 from imeme._core.text_recognition import sync_image_ocr
 from imeme._core.utils import reverse_byte_stream
 
@@ -49,9 +49,13 @@ from .fetching import (
 from .peer import Peer
 
 
-def classify_peer_language(
-    peer: Peer, /, *, cache_directory_path: Path, default: LanguageCategory
-) -> LanguageCategory:
+def classify_peer_languages(
+    peer: Peer,
+    /,
+    *,
+    cache_directory_path: Path,
+    default: list[SupportedLanguage],
+) -> list[SupportedLanguage]:
     character_categories_counter = (
         Counter()
         if peer.display_name is None
@@ -63,18 +67,23 @@ def classify_peer_language(
         character_categories_counter += _to_string_raw_categories_counter(
             message.message
         )
-    try:
-        candidate_count, candidate_raw_language_category = max(
-            (value, key)
+    total_characters_count = character_categories_counter.total()
+    return (
+        sorted(
+            SupportedLanguage.ENGLISH
+            if (
+                SupportedLanguageCategory(key)
+                is SupportedLanguageCategory.LATIN
+            )
+            else SupportedLanguage.RUSSIAN
             for key, value in character_categories_counter.items()
-            if any(key == category.value for category in LanguageCategory)
+            if (
+                SupportedLanguageCategory.is_supported(key)
+                and value / total_characters_count > 0.05
+            )
         )
-    except ValueError:
-        return default
-    else:
-        if 2 * candidate_count > character_categories_counter.total():
-            return LanguageCategory(candidate_raw_language_category)
-        return default
+        or default
+    )
 
 
 async def sync_images(
@@ -108,7 +117,7 @@ def sync_images_ocr(
     /,
     *,
     cache_directory_path: Path,
-    default_language_category: LanguageCategory,
+    default_languages: list[SupportedLanguage],
     logger: logging.Logger,
     max_subprocesses_count: int,
 ) -> None:
@@ -117,20 +126,15 @@ def sync_images_ocr(
         max_subprocesses_count,
     )
     if max_subprocesses_count == 1:
-        log_queue: Queue[Any] = Queue()
-        listener = QueueListener(log_queue, *logger.handlers)
-        listener.start()
         for peer in peers:
             _sync_peer_images_ocr(
                 peer,
                 cache_directory_path=cache_directory_path,
-                default_language_category=default_language_category,
-                log_queue=log_queue,
+                default_languages=default_languages,
+                log_queue=None,
                 logger_level=logger.level,
                 logger_name=logger.name,
             )
-        logger.debug('Waiting for listener thread to finish...')
-        listener.stop()
     else:
         with (
             ProcessPoolExecutor(max_subprocesses_count) as pool,
@@ -144,7 +148,7 @@ def sync_images_ocr(
                     _sync_peer_images_ocr,
                     peer,
                     cache_directory_path=cache_directory_path,
-                    default_language_category=default_language_category,
+                    default_languages=default_languages,
                     log_queue=log_queue,
                     logger_level=logger.level,
                     logger_name=str(peer),
@@ -657,24 +661,23 @@ def _sync_peer_images_ocr(
     /,
     *,
     cache_directory_path: Path,
-    default_language_category: LanguageCategory,
-    log_queue: Queue[Any],
+    default_languages: list[SupportedLanguage],
+    log_queue: Queue[Any] | None,
     logger_level: int,
     logger_name: str,
 ) -> None:
     logger = logging.getLogger(logger_name)
-    queue_handler = QueueHandler(log_queue)
-    logger.addHandler(queue_handler)
-    logger.setLevel(logger_level)
+    if log_queue is not None:
+        queue_handler = QueueHandler(log_queue)
+        logger.addHandler(queue_handler)
+        logger.setLevel(logger_level)
     logger.info('Starting images OCR for %s.', peer)
-    language_category = classify_peer_language(
+    languages = classify_peer_languages(
         peer,
         cache_directory_path=cache_directory_path,
-        default=default_language_category,
+        default=default_languages,
     )
-    logger.debug(
-        'Detected language category %r for %s', language_category, peer
-    )
+    logger.debug('Detected languages for %s: %s', peer, ', '.join(languages))
     image_chunk_start_count = image_counter = 0
     for image_counter, image_file_path in enumerate(
         _iter_cached_peer_image_file_paths(
@@ -683,9 +686,7 @@ def _sync_peer_images_ocr(
         start=1,
     ):
         try:
-            sync_image_ocr(
-                image_file_path, language_category=language_category
-            )
+            sync_image_ocr(image_file_path, languages=languages)
         except Exception:
             logger.debug(
                 'Failed OCR of image with path %s for %s, skipping.',
