@@ -66,7 +66,7 @@ class Peer:
         description = (
             f'with ID {self._id}'
             if self._display_name is None
-            else repr(self._display_name)
+            else f'{self._display_name!r} (ID {self._id})'
         )
         return f'peer {description}'
 
