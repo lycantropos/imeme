@@ -31,7 +31,10 @@ from telethon.tl.types import (  # type: ignore[import-untyped]
 
 from imeme._core.caching import calculate_file_hash, to_hasher
 from imeme._core.language import SupportedLanguage, SupportedLanguageCategory
-from imeme._core.text_recognition import sync_image_ocr
+from imeme._core.text_recognition import (
+    languages_to_recognizer,
+    sync_image_ocr,
+)
 from imeme._core.utils import reverse_byte_stream
 
 from .constants import (
@@ -137,7 +140,11 @@ def sync_images_ocr(
             )
     else:
         with (
-            ProcessPoolExecutor(max_subprocesses_count) as pool,
+            ProcessPoolExecutor(
+                max_subprocesses_count,
+                # "fork" is not supported by `easyOCR`
+                multiprocessing.get_context('spawn'),
+            ) as pool,
             multiprocessing.Manager() as manager,
         ):
             log_queue = manager.Queue()
@@ -678,6 +685,7 @@ def _sync_peer_images_ocr(
         default=default_languages,
     )
     logger.debug('Detected languages for %s: %s', peer, ', '.join(languages))
+    recognizer = languages_to_recognizer(tuple(languages))
     image_chunk_start_count = image_counter = 0
     for image_counter, image_file_path in enumerate(
         _iter_cached_peer_image_file_paths(
@@ -686,7 +694,7 @@ def _sync_peer_images_ocr(
         start=1,
     ):
         try:
-            sync_image_ocr(image_file_path, languages=languages)
+            sync_image_ocr(image_file_path, recognizer=recognizer)
         except Exception:
             logger.debug(
                 'Failed OCR of image with path %s for %s, skipping.',

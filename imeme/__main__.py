@@ -17,6 +17,10 @@ from imeme._core.configuration import Configuration
 from imeme._core.language import SupportedLanguage
 from imeme._core.telegram import Peer, RawPeer, sync_images, sync_images_ocr
 
+MIN_DEFAULT_LANGUAGES_COUNT = 1
+
+MAX_DEFAULT_LANGUAGES_COUNT = 2
+
 
 class Context:
     @property
@@ -155,6 +159,29 @@ def sync(
             continue
         else:
             raw_peers.append(raw_peer)
+    default_languages_list = telegram_configuration_section.get_list(
+        'default_languages'
+    )
+    default_languages = [
+        SupportedLanguage(language_field.extract_exact(str))
+        for language_field in default_languages_list
+    ]
+    if not (
+        MIN_DEFAULT_LANGUAGES_COUNT
+        <= len(default_languages)
+        <= MAX_DEFAULT_LANGUAGES_COUNT
+    ):
+        raise ValueError(
+            f'Invalid {default_languages_list} size: '
+            f'expected to be from {MIN_DEFAULT_LANGUAGES_COUNT} '
+            f'to {MAX_DEFAULT_LANGUAGES_COUNT}, '
+            f'but got {len(default_languages)}.'
+        )
+    if len(default_languages) != len(set(default_languages)):
+        raise ValueError(
+            f'Invalid {default_languages_list} elements: '
+            'expected to be distinct.'
+        )
     asyncio.run(
         _sync(
             raw_peers,
@@ -163,12 +190,7 @@ def sync(
                 str
             ),
             cache_directory_path=context.cache_directory_path,
-            default_languages=[
-                SupportedLanguage(language_field.extract_exact(str))
-                for language_field in telegram_configuration_section.get_list(
-                    'default_languages'
-                )
-            ],
+            default_languages=default_languages,
             logger=logger,
             max_subprocesses_count=max_subprocesses_count,
             targets=targets,
