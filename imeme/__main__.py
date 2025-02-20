@@ -10,6 +10,7 @@ from typing import Any
 import click
 import tomli
 from telethon import TelegramClient  # type: ignore[import-untyped]
+from telethon.sessions import StringSession  # type: ignore[import-untyped]
 from typing_extensions import Self
 
 import imeme
@@ -212,7 +213,27 @@ async def _sync(
 ) -> None:
     sync_all = len(targets) == 0
     telegram_cache_directory_path = cache_directory_path / 'telegram'
-    async with TelegramClient(str(api_id), api_id, api_hash) as client:
+    client: TelegramClient
+    session_string_file_path = Path(f'{api_id}.session.string')
+    try:
+        session_string = session_string_file_path.read_text()
+    except OSError:
+        session_string = None
+    async with TelegramClient(
+        (
+            StringSession()
+            if session_string is None
+            else StringSession(session_string)
+        ),
+        api_id,
+        api_hash,
+    ) as client:
+        if session_string is None:
+            session = client.session
+            assert isinstance(session, StringSession), session
+            session_string = session.save()
+            assert len(session_string) > 0, session_string
+            session_string_file_path.write_text(session_string)
         peers: list[Peer] = []
         for raw_peer in raw_peers:
             try:
@@ -224,8 +245,11 @@ async def _sync(
                 continue
             else:
                 peers.append(peer)
-        if sync_all or SyncTarget.IMAGES in targets:
-            telegram_cache_directory_path.mkdir(exist_ok=True)
+    if sync_all or SyncTarget.IMAGES in targets:
+        telegram_cache_directory_path.mkdir(exist_ok=True)
+        async with TelegramClient(
+            StringSession(session_string), api_id, api_hash
+        ) as client:
             await sync_images(
                 peers,
                 client=client,
