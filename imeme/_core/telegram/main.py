@@ -406,6 +406,7 @@ async def _safe_sync_message_image(
         logger.debug(
             'Failed message %s image synchronization, skipping.',
             message.to_json(),
+            exc_info=True,
         )
 
 
@@ -700,6 +701,7 @@ def _sync_peer_images_ocr(
                 'Failed OCR of image with path %s for %s, skipping.',
                 image_file_path,
                 peer,
+                exc_info=True,
             )
             continue
         finally:
