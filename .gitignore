@@ -32,6 +32,7 @@ venv*/
 
 ### telethon
 *.session
+*.session.string
 *.session-journal
 
 ### imeme
