@@ -5,7 +5,7 @@ import logging.config
 import os
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 import click
 import tomli
@@ -18,9 +18,8 @@ from imeme._core.configuration import Configuration
 from imeme._core.language import SupportedLanguage
 from imeme._core.telegram import Peer, RawPeer, sync_images, sync_images_ocr
 
-MIN_DEFAULT_LANGUAGES_COUNT = 1
-
-MAX_DEFAULT_LANGUAGES_COUNT = 2
+MAX_DEFAULT_LANGUAGES_COUNT: Final[int] = 2
+MIN_DEFAULT_LANGUAGES_COUNT: Final[int] = 1
 
 
 class Context:
