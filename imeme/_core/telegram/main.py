@@ -177,6 +177,43 @@ def sync_images_ocr(
             listener.stop()
 
 
+_IMAGE_DOCUMENT_EXTENSION: Final[str] = 'png'
+_IMAGE_DOCUMENT_MIME_TYPE_PREFIX: Final[str] = 'image/'
+_IMAGE_OCR_CHUNK_SIZE: Final[int] = 4
+_MAX_TELEGRAM_MESSAGE_DATE: Final[dt.date] = dt.date.max
+_MIN_TELEGRAM_MESSAGE_DATE: Final[dt.date] = dt.date(2013, 1, 1)
+
+
+def _deserialize_peer_message_line(value: bytes, /) -> Message:
+    result = BinaryReader(
+        base64.b64decode(value[: -len(MESSAGE_CACHE_FILE_SEPARATOR)])
+    ).tgread_object()
+    if not isinstance(result, Message):
+        raise TypeError(result)
+    return result
+
+
+def _is_file_in_cache(
+    *, cache_file_path: Path, cache_hash_file_path: Path, file_size: int
+) -> bool:
+    try:
+        cache_file = cache_file_path.open('rb')
+    except OSError:
+        pass
+    else:
+        with cache_file:
+            try:
+                expected_cache_file_hash = cache_hash_file_path.read_bytes()
+            except OSError:
+                pass
+            else:
+                if (
+                    calculate_file_hash(cache_file) == expected_cache_file_hash
+                ) and (cache_file.seek(0, os.SEEK_END) == file_size):
+                    return True
+    return False
+
+
 def _iter_cached_peer_image_file_paths(
     peer: Peer, /, *, cache_directory_path: Path
 ) -> Iterable[Path]:
@@ -197,16 +234,18 @@ def _iter_cached_peer_image_file_paths(
         if isinstance(message_media, MessageMediaPhoto):
             message_photo = message_media.photo
             assert isinstance(message_photo, Photo), message
-            image_cache_file_name_without_extension = (
-                f'{message.id}_{message_photo.id}'
+            image_cache_base_file_name = (
+                _message_photo_to_image_cache_base_file_name(
+                    message, message_photo
+                )
             )
             image_cache_file_path = (
                 image_cache_directory_path
-                / f'{image_cache_file_name_without_extension}.jpg'
+                / f'{image_cache_base_file_name}.jpg'
             )
             image_cache_hash_file_path = (
                 image_cache_directory_path
-                / f'{image_cache_file_name_without_extension}.hash'
+                / f'{image_cache_base_file_name}.hash'
             )
             if _is_file_in_cache(
                 cache_file_path=image_cache_file_path,
@@ -221,19 +260,23 @@ def _iter_cached_peer_image_file_paths(
             if message_document_mime_type.startswith(
                 _IMAGE_DOCUMENT_MIME_TYPE_PREFIX
             ):
-                image_cache_file_name_without_extension = (
-                    f'{message.id}_{message_document.id}'
-                )
                 image_cache_file_extension = message_document_mime_type[
                     len(_IMAGE_DOCUMENT_MIME_TYPE_PREFIX) :
                 ]
+                if image_cache_file_extension != _IMAGE_DOCUMENT_EXTENSION:
+                    return
+                image_cache_base_file_name = (
+                    _message_document_to_image_cache_base_file_name(
+                        message, message_document
+                    )
+                )
                 image_cache_file_path = image_cache_directory_path / (
-                    f'{image_cache_file_name_without_extension}'
+                    f'{image_cache_base_file_name}'
                     f'.{image_cache_file_extension}'
                 )
                 image_cache_hash_file_path = (
                     image_cache_directory_path
-                    / f'{image_cache_file_name_without_extension}.hash'
+                    / f'{image_cache_base_file_name}.hash'
                 )
                 if _is_file_in_cache(
                     cache_file_path=image_cache_file_path,
@@ -298,42 +341,6 @@ def _iter_cached_peer_messages(
                     continue
 
 
-_IMAGE_DOCUMENT_MIME_TYPE_PREFIX: Final[str] = 'image/'
-_IMAGE_OCR_CHUNK_SIZE: Final[int] = 4
-_MAX_TELEGRAM_MESSAGE_DATE: Final[dt.date] = dt.date.max
-_MIN_TELEGRAM_MESSAGE_DATE: Final[dt.date] = dt.date(2013, 1, 1)
-
-
-def _deserialize_peer_message_line(value: bytes, /) -> Message:
-    result = BinaryReader(
-        base64.b64decode(value[: -len(MESSAGE_CACHE_FILE_SEPARATOR)])
-    ).tgread_object()
-    if not isinstance(result, Message):
-        raise TypeError(result)
-    return result
-
-
-def _is_file_in_cache(
-    *, cache_file_path: Path, cache_hash_file_path: Path, file_size: int
-) -> bool:
-    try:
-        cache_file = cache_file_path.open('rb')
-    except OSError:
-        pass
-    else:
-        with cache_file:
-            try:
-                expected_cache_file_hash = cache_hash_file_path.read_bytes()
-            except OSError:
-                pass
-            else:
-                if (
-                    calculate_file_hash(cache_file) == expected_cache_file_hash
-                ) and (cache_file.seek(0, os.SEEK_END) == file_size):
-                    return True
-    return False
-
-
 def _load_newest_cached_peer_message(file: IO[bytes], /) -> Message:
     if file.tell() != 0:
         file.seek(0)
@@ -367,6 +374,18 @@ def _load_oldest_cached_peer_message(file: IO[bytes], /) -> Message:
             result,
         )
     return result
+
+
+def _message_document_to_image_cache_base_file_name(
+    message: Message, message_document: Document, /
+) -> str:
+    return f'{message.id}_{message_document.id}'
+
+
+def _message_photo_to_image_cache_base_file_name(
+    message: Message, message_photo: Photo, /
+) -> str:
+    return f'{message.id}_{message_photo.id}'
 
 
 def _photo_to_image_file_size(value: Photo, /) -> int:
@@ -410,19 +429,6 @@ async def _safe_sync_message_image(
         )
 
 
-def _to_string_raw_categories_counter(
-    value: str,
-    /,
-    *,
-    url_pattern: re.Pattern[str] = re.compile(r'https?://\S+'),
-) -> Counter[str]:
-    return Counter(
-        unicodedata.name(character).split(maxsplit=1)[0].lower()
-        for character in url_pattern.sub('', value)
-        if character.isalpha()
-    )
-
-
 async def _sync_message_image(
     message: Message,
     /,
@@ -442,16 +448,16 @@ async def _sync_message_image(
     if isinstance(message_media, MessageMediaPhoto):
         message_photo = message_media.photo
         assert isinstance(message_photo, Photo), message
-        image_cache_file_name_without_extension = (
-            f'{message.id}_{message_photo.id}'
+        image_cache_base_file_name = (
+            _message_photo_to_image_cache_base_file_name(
+                message, message_photo
+            )
         )
         image_cache_file_path = (
-            image_cache_directory_path
-            / f'{image_cache_file_name_without_extension}.jpg'
+            image_cache_directory_path / f'{image_cache_base_file_name}.jpg'
         )
         image_cache_hash_file_path = (
-            image_cache_directory_path
-            / f'{image_cache_file_name_without_extension}.hash'
+            image_cache_directory_path / f'{image_cache_base_file_name}.hash'
         )
         if _is_file_in_cache(
             cache_file_path=image_cache_file_path,
@@ -470,19 +476,22 @@ async def _sync_message_image(
         if message_document_mime_type.startswith(
             _IMAGE_DOCUMENT_MIME_TYPE_PREFIX
         ):
-            image_cache_file_name_without_extension = (
-                f'{message.id}_{message_document.id}'
-            )
             image_cache_file_extension = message_document_mime_type[
                 len(_IMAGE_DOCUMENT_MIME_TYPE_PREFIX) :
             ]
+            if image_cache_file_extension != _IMAGE_DOCUMENT_EXTENSION:
+                return
+            image_cache_base_file_name = (
+                _message_document_to_image_cache_base_file_name(
+                    message, message_document
+                )
+            )
             image_cache_file_path = image_cache_directory_path / (
-                f'{image_cache_file_name_without_extension}'
-                f'.{image_cache_file_extension}'
+                f'{image_cache_base_file_name}.{image_cache_file_extension}'
             )
             image_cache_hash_file_path = (
                 image_cache_directory_path
-                / f'{image_cache_file_name_without_extension}.hash'
+                / f'{image_cache_base_file_name}.hash'
             )
             if _is_file_in_cache(
                 cache_file_path=image_cache_file_path,
@@ -721,3 +730,16 @@ def _sync_peer_images_ocr(
             peer,
         )
     logger.info('Successfully finished images OCR for %s.', peer)
+
+
+def _to_string_raw_categories_counter(
+    value: str,
+    /,
+    *,
+    url_pattern: re.Pattern[str] = re.compile(r'https?://\S+'),
+) -> Counter[str]:
+    return Counter(
+        unicodedata.name(character).split(maxsplit=1)[0].lower()
+        for character in url_pattern.sub('', value)
+        if character.isalpha()
+    )
