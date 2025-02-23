@@ -17,6 +17,7 @@ import imeme
 from imeme._core.configuration import Configuration
 from imeme._core.language import SupportedLanguage
 from imeme._core.telegram import Peer, RawPeer, sync_images, sync_images_ocr
+from imeme._core.typesense import sync_typesense_telegram_image_documents
 
 MAX_DEFAULT_LANGUAGES_COUNT: Final[int] = 2
 MIN_DEFAULT_LANGUAGES_COUNT: Final[int] = 1
@@ -101,6 +102,7 @@ def main(
 class SyncTarget(str, enum.Enum):
     IMAGES = 'images'
     IMAGE_OCR = 'image_ocr'
+    TYPESENSE = 'typesense'
 
 
 def _get_max_available_cpus() -> int:
@@ -182,6 +184,7 @@ def sync(
             f'Invalid {default_languages_list} elements: '
             'expected to be distinct.'
         )
+    typesense_configuration_section = configuration.get_section('typesense')
     asyncio.run(
         _sync(
             raw_peers,
@@ -194,6 +197,15 @@ def sync(
             logger=logger,
             max_subprocesses_count=max_subprocesses_count,
             targets=targets,
+            typesense_api_key=typesense_configuration_section[
+                'api_key'
+            ].extract_exact(str),
+            typesense_image_version=typesense_configuration_section[
+                'image_version'
+            ].extract_exact(str),
+            typesense_port=typesense_configuration_section[
+                'port'
+            ].extract_exact(int),
         )
     )
 
@@ -209,6 +221,9 @@ async def _sync(
     logger: logging.Logger,
     max_subprocesses_count: int,
     targets: list[SyncTarget],
+    typesense_api_key: str,
+    typesense_image_version: str,
+    typesense_port: int,
 ) -> None:
     sync_all = len(targets) == 0
     telegram_cache_directory_path = cache_directory_path / 'telegram'
@@ -262,6 +277,16 @@ async def _sync(
             default_languages=default_languages,
             logger=logger,
             max_subprocesses_count=max_subprocesses_count,
+        )
+    if sync_all or SyncTarget.TYPESENSE in targets:
+        await sync_typesense_telegram_image_documents(
+            peers,
+            cache_directory_path=cache_directory_path,
+            logger=logger,
+            telegram_cache_directory_path=telegram_cache_directory_path,
+            typesense_api_key=typesense_api_key,
+            typesense_image_version=typesense_image_version,
+            typesense_port=typesense_port,
         )
 
 

@@ -38,26 +38,32 @@ repos:
         args:
           - --strict
         additional_dependencies:
+          - 'aiodocker>=0.24.0'
           - 'click>=8.1.8,<9.0'
           - 'easyocr>=1.7.2,<2.0'
+          - 'httpx>=0.28.1,<1.0'
           - 'hypothesis>=6.125.2,<7.0'
           - 'pytest>=8.3.4,<9.0'
           - 'telethon>=1.38.1,<2.0'
           - 'tomli>=2.2.1,<3.0'
           - 'types-setuptools'
+          - 'typesense>=0.21.0'
           - 'typing_extensions>=4.12.2,<5.0'
   - repo: https://github.com/RobertCraigie/pyright-python
     rev: v1.1.394
     hooks:
       - id: pyright
         additional_dependencies:
+          - 'aiodocker>=0.24.0'
           - 'click>=8.1.8,<9.0'
           - 'easyocr>=1.7.2,<2.0'
+          - 'httpx>=0.28.1,<1.0'
           - 'hypothesis>=6.125.2,<7.0'
           - 'pytest>=8.3.4,<9.0'
           - 'telethon>=1.38.1,<2.0'
           - 'tomli>=2.2.1,<3.0'
           - 'types-setuptools'
+          - 'typesense>=0.21.0'
           - 'typing_extensions>=4.12.2,<5.0'
   - repo: https://github.com/rhysd/actionlint
     rev: v1.7.7

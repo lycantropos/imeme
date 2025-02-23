@@ -8,7 +8,7 @@ import os
 import re
 import unicodedata
 from collections import Counter
-from collections.abc import Iterable
+from collections.abc import Container, Iterable
 from concurrent.futures import as_completed
 from concurrent.futures.process import ProcessPoolExecutor
 from logging.handlers import QueueHandler, QueueListener
@@ -32,7 +32,8 @@ from telethon.tl.types import (  # type: ignore[import-untyped]
 from imeme._core.caching import calculate_file_hash, to_hasher
 from imeme._core.language import SupportedLanguage, SupportedLanguageCategory
 from imeme._core.text_recognition import (
-    languages_to_recognizer,
+    languages_to_image_text_recognizer,
+    load_image_ocr_result_from_cache,
     sync_image_ocr,
 )
 from imeme._core.utils import reverse_byte_stream
@@ -49,6 +50,7 @@ from .fetching import (
     fetch_oldest_peer_message,
     fetch_peer_messages_with_caching,
 )
+from .image import Image
 from .peer import Peer
 
 
@@ -64,7 +66,7 @@ def classify_peer_languages(
         if peer.display_name is None
         else _to_string_raw_categories_counter(peer.display_name)
     )
-    for message in _iter_cached_peer_messages(
+    for _, message in _iter_dated_cached_peer_messages(
         peer, cache_directory_path=cache_directory_path
     ):
         character_categories_counter += _to_string_raw_categories_counter(
@@ -112,6 +114,26 @@ async def sync_images(
         else:
             logger.info(
                 'Successfully finished images synchronization for %s.', peer
+            )
+
+
+def iter_images(
+    peers: list[Peer], /, *, cache_directory_path: Path
+) -> Iterable[Image]:
+    for peer in peers:
+        for (
+            image_message,
+            image_cache_file_path,
+        ) in _iter_cached_peer_messages_with_image_file_paths(
+            peer, cache_directory_path=cache_directory_path
+        ):
+            image_ocr_result = load_image_ocr_result_from_cache(
+                image_cache_file_path
+            )
+            yield Image(
+                file_path=image_cache_file_path,
+                message=image_message,
+                ocr_result=image_ocr_result,
             )
 
 
@@ -177,7 +199,7 @@ def sync_images_ocr(
             listener.stop()
 
 
-_IMAGE_DOCUMENT_EXTENSION: Final[str] = 'png'
+_IMAGE_DOCUMENT_EXTENSIONS: Final[Container[str]] = {'png', 'webp'}
 _IMAGE_DOCUMENT_MIME_TYPE_PREFIX: Final[str] = 'image/'
 _IMAGE_OCR_CHUNK_SIZE: Final[int] = 4
 _MAX_TELEGRAM_MESSAGE_DATE: Final[dt.date] = dt.date.max
@@ -214,23 +236,18 @@ def _is_file_in_cache(
     return False
 
 
-def _iter_cached_peer_image_file_paths(
+def _iter_cached_peer_messages_with_image_file_paths(
     peer: Peer, /, *, cache_directory_path: Path
-) -> Iterable[Path]:
+) -> Iterable[tuple[Message, Path]]:
     message_batches_cache_directory_path = cache_directory_path / str(peer.id)
-    for message in _iter_cached_peer_messages(
+    for message_date, message in _iter_dated_cached_peer_messages(
         peer, cache_directory_path=cache_directory_path
     ):
-        message_media = message.media
-        message_datetime = message.date
-        if message_datetime is None:
-            continue
         image_cache_directory_path = (
             message_batches_cache_directory_path
-            / message_datetime.date().strftime(
-                MESSAGE_CACHE_DIRECTORY_NAME_FORMAT
-            )
+            / message_date.strftime(MESSAGE_CACHE_DIRECTORY_NAME_FORMAT)
         )
+        message_media = message.media
         if isinstance(message_media, MessageMediaPhoto):
             message_photo = message_media.photo
             assert isinstance(message_photo, Photo), message
@@ -243,16 +260,15 @@ def _iter_cached_peer_image_file_paths(
                 image_cache_directory_path
                 / f'{image_cache_base_file_name}.jpg'
             )
-            image_cache_hash_file_path = (
-                image_cache_directory_path
-                / f'{image_cache_base_file_name}.hash'
-            )
             if _is_file_in_cache(
                 cache_file_path=image_cache_file_path,
-                cache_hash_file_path=image_cache_hash_file_path,
+                cache_hash_file_path=(
+                    image_cache_directory_path
+                    / f'{image_cache_base_file_name}.hash'
+                ),
                 file_size=_photo_to_image_file_size(message_photo),
             ):
-                yield image_cache_file_path
+                yield message, image_cache_file_path
         elif isinstance(message_media, MessageMediaDocument):
             message_document = message_media.document
             assert isinstance(message_document, Document), message
@@ -263,8 +279,11 @@ def _iter_cached_peer_image_file_paths(
                 image_cache_file_extension = message_document_mime_type[
                     len(_IMAGE_DOCUMENT_MIME_TYPE_PREFIX) :
                 ]
-                if image_cache_file_extension != _IMAGE_DOCUMENT_EXTENSION:
-                    return
+                if (
+                    image_cache_file_extension
+                    not in _IMAGE_DOCUMENT_EXTENSIONS
+                ):
+                    continue
                 image_cache_base_file_name = (
                     _message_document_to_image_cache_base_file_name(
                         message, message_document
@@ -274,71 +293,79 @@ def _iter_cached_peer_image_file_paths(
                     f'{image_cache_base_file_name}'
                     f'.{image_cache_file_extension}'
                 )
-                image_cache_hash_file_path = (
-                    image_cache_directory_path
-                    / f'{image_cache_base_file_name}.hash'
-                )
                 if _is_file_in_cache(
                     cache_file_path=image_cache_file_path,
-                    cache_hash_file_path=image_cache_hash_file_path,
+                    cache_hash_file_path=(
+                        image_cache_directory_path
+                        / f'{image_cache_base_file_name}.hash'
+                    ),
                     file_size=message_document.size,
                 ):
-                    yield image_cache_file_path
+                    yield message, image_cache_file_path
 
 
-def _iter_cached_peer_messages(
+def _iter_dated_cached_peer_messages(
     peer: Peer, /, *, cache_directory_path: Path
-) -> Iterable[Message]:
-    message_batches_cache_directory_path = cache_directory_path / str(peer.id)
-    message_batches_cache_directory_path.mkdir(exist_ok=True)
-    for _, candidate_message_cache_directory_path in sorted(
-        [
-            (date, path)
-            for path in message_batches_cache_directory_path.iterdir()
-            if (
-                path.is_dir()
-                and (
-                    (
-                        date := _safe_parse_date(
-                            path.name, MESSAGE_CACHE_DIRECTORY_NAME_FORMAT
+) -> Iterable[tuple[dt.date, Message]]:
+    try:
+        message_dates_with_cache_directory_paths = sorted(
+            [
+                (message_date, message_cache_directory_path)
+                for message_cache_directory_path in (
+                    cache_directory_path / str(peer.id)
+                ).iterdir()
+                if (
+                    message_cache_directory_path.is_dir()
+                    and (
+                        (
+                            message_date := _safe_parse_date(
+                                message_cache_directory_path.name,
+                                MESSAGE_CACHE_DIRECTORY_NAME_FORMAT,
+                            )
                         )
+                        is not None
                     )
-                    is not None
                 )
-            )
-        ]
-    ):
-        candidate_message_cache_file_path = (
-            candidate_message_cache_directory_path / MESSAGE_CACHE_FILE_NAME
+            ]
+        )
+    except OSError:
+        return
+    for (
+        message_date,
+        message_cache_directory_path,
+    ) in message_dates_with_cache_directory_paths:
+        message_cache_file_path = (
+            message_cache_directory_path / MESSAGE_CACHE_FILE_NAME
         )
         try:
-            candidate_message_cache_file = (
-                candidate_message_cache_file_path.open('rb')
-            )
+            message_cache_file = message_cache_file_path.open('rb')
         except OSError:
             continue
-        with candidate_message_cache_file:
-            candidate_message_cache_hash_file_path = (
-                candidate_message_cache_directory_path
-                / MESSAGE_CACHE_HASH_FILE_NAME
-            )
+        with message_cache_file:
             try:
-                expected_candidate_message_cache_file_hash = (
-                    candidate_message_cache_hash_file_path
+                expected_message_cache_file_hash = (
+                    message_cache_directory_path / MESSAGE_CACHE_HASH_FILE_NAME
                 ).read_bytes()
             except OSError:
                 continue
-            if _candidate_message_cache_file_has_invalid_hash := (
-                calculate_file_hash(candidate_message_cache_file)
-                != expected_candidate_message_cache_file_hash
+            if _message_cache_file_has_invalid_hash := (
+                calculate_file_hash(message_cache_file)
+                != expected_message_cache_file_hash
             ):
                 continue
-            candidate_message_cache_file.seek(0)
-            for message_line in candidate_message_cache_file:
+            message_cache_file.seek(0)
+            for message_line in message_cache_file:
                 try:
-                    yield _deserialize_peer_message_line(message_line)
+                    message = _deserialize_peer_message_line(message_line)
                 except Exception:
                     continue
+                else:
+                    assert message.date is not None, message
+                    assert message.date.date() == message_date, (
+                        message_date,
+                        message,
+                    )
+                    yield message_date, message
 
 
 def _load_newest_cached_peer_message(file: IO[bytes], /) -> Message:
@@ -479,7 +506,7 @@ async def _sync_message_image(
             image_cache_file_extension = message_document_mime_type[
                 len(_IMAGE_DOCUMENT_MIME_TYPE_PREFIX) :
             ]
-            if image_cache_file_extension != _IMAGE_DOCUMENT_EXTENSION:
+            if image_cache_file_extension not in _IMAGE_DOCUMENT_EXTENSIONS:
                 return
             image_cache_base_file_name = (
                 _message_document_to_image_cache_base_file_name(
@@ -695,16 +722,20 @@ def _sync_peer_images_ocr(
         default=default_languages,
     )
     logger.debug('Detected languages for %s: %s', peer, ', '.join(languages))
-    recognizer = languages_to_recognizer(tuple(languages))
+    image_text_recognizer = languages_to_image_text_recognizer(
+        tuple(languages)
+    )
     image_chunk_start_count = image_counter = 0
-    for image_counter, image_file_path in enumerate(
-        _iter_cached_peer_image_file_paths(
+    for image_counter, (_, image_file_path) in enumerate(
+        _iter_cached_peer_messages_with_image_file_paths(
             peer, cache_directory_path=cache_directory_path
         ),
         start=1,
     ):
         try:
-            sync_image_ocr(image_file_path, recognizer=recognizer)
+            sync_image_ocr(
+                image_file_path, image_text_recognizer=image_text_recognizer
+            )
         except Exception:
             logger.debug(
                 'Failed OCR of image with path %s for %s, skipping.',
