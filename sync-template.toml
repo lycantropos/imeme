@@ -13,3 +13,8 @@ peers = [
 ]
 # defines default languages for OCR by their ISO 639-1:2002 codes
 default_languages = ["en", "ru"]
+
+[typesense]
+api_key = "1234567890abcdef"
+image_version = "28.0"
+port = 8108
