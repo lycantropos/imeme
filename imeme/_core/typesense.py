@@ -14,8 +14,9 @@ from typesense import Client as TypesenseClient  # type: ignore[import-untyped]
 from typesense.collection import Collection  # type: ignore[import-untyped]
 from typesense.exceptions import ObjectNotFound  # type: ignore[import-untyped]
 
-from imeme._core.json_wrapper import JsonWrapper
-from imeme._core.telegram import Image, Peer, iter_images
+from .json_wrapper import JsonWrapper
+from .telegram import Image, Peer, iter_images
+from .utils import to_chunks
 
 
 @contextlib.asynccontextmanager
@@ -161,21 +162,38 @@ async def sync_typesense_telegram_image_documents(
             logger.debug(JsonWrapper(create_response))
         else:
             logger.debug(JsonWrapper(retrieve_response))
-        upsert_responses = images_typesense_collection.documents.import_(
+        logger.info('Starting upserting of typesense documents.')
+        upserted_documents_count = 0
+        total_documents_count = 0
+        for documents_chunk in to_chunks(
             _iter_telegram_image_documents(
                 peers,
                 cache_directory_path=telegram_cache_directory_path,
                 logger=logger,
             ),
-            {'action': 'upsert'},
-            batch_size=1_000,
-        )
-        logger.debug(
-            'Successfully upserted %s/%s typesense documents.',
-            sum(
+            size=1_000,
+        ):
+            upsert_responses = images_typesense_collection.documents.import_(
+                documents_chunk, {'action': 'upsert'}
+            )
+            assert len(upsert_responses) == len(documents_chunk), (
+                upsert_responses,
+                documents_chunk,
+            )
+            upserted_documents_chunk_count = sum(
                 response.get('success', False) for response in upsert_responses
-            ),
-            len(upsert_responses),
+            )
+            upserted_documents_count += upserted_documents_chunk_count
+            total_documents_count += len(documents_chunk)
+            logger.debug(
+                'Successfully upserted %s/%s typesense documents.',
+                upserted_documents_chunk_count,
+                len(documents_chunk),
+            )
+        logger.info(
+            'Successfully finished upserting of %s/%s typesense documents.',
+            upserted_documents_count,
+            total_documents_count,
         )
 
 
